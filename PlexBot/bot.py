@@ -4,9 +4,14 @@ import io
 import logging
 from urllib.request import urlopen
 import requests
+import sys
 
 import discord
-from async_timeout import timeout
+if sys.version_info.major == 3 and sys.version_info.minor >= 11:
+    from asyncio.exceptions import TimeoutError
+else:
+    from asyncio import TimeoutError
+import async_timeout
 from discord import FFmpegPCMAudio
 from discord.ext import commands
 from discord.ext.commands import command
@@ -218,7 +223,8 @@ class Plex(commands.Cog):
         self.play_next_event = asyncio.Event()
 
         bot_log.info("Started bot successfully")
-        self.bot.loop.create_task(self._audio_player_task())
+    def cog_load(self):
+        asyncio.create_task(self._audio_player_task())
 
     def _search_tracks(self, title: str):
         """
@@ -301,21 +307,24 @@ class Plex(commands.Cog):
         Raises:
             None
         """
-        track_url = self.current_track.getStreamURL()
-        audio_stream = FFmpegPCMAudio(track_url)
+        if self.current_track is not None:
+            track_url = self.current_track.getStreamURL()
+            audio_stream = FFmpegPCMAudio(track_url)
 
-        while self.voice_channel and self.voice_channel.is_playing():
-            bot_log.debug("waiting for track to finish")
-            await asyncio.sleep(2)
-        bot_log.debug("track finished")
+            while self.voice_channel and self.voice_channel.is_playing():
+                bot_log.debug("waiting for track to finish")
+                await asyncio.sleep(2)
+            bot_log.debug("track finished")
 
-        if self.voice_channel:
-            self.voice_channel.play(audio_stream, after=self._toggle_next)
+            if self.voice_channel:
+                self.voice_channel.play(audio_stream, after=self._toggle_next)
 
-            plex_log.debug("%s - URL: %s", self.current_track, track_url)
+                plex_log.debug("%s - URL: %s", self.current_track, track_url)
 
-            embed, img = self._build_embed_track(self.current_track)
-            self.np_message_id = await self.ctx.send(embed=embed, file=img)
+                embed, img = self._build_embed_track(self.current_track)
+                self.np_message_id = await self.ctx.send(embed=embed, file=img)
+        else:
+            print("self.current_track is None")
 
     async def _play_next(self):
         try:
@@ -362,7 +371,7 @@ class Plex(commands.Cog):
             if self.voice_channel:
                 try:
                     # Disconnect after 15 seconds idle
-                    async with timeout(15):
+                    async with async_timeout.timeout(15):
                         await self._play_next()
                 except asyncio.TimeoutError:
                     bot_log("timeout - disconnecting")
